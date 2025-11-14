@@ -1,10 +1,27 @@
-# Personal-Expense-Tracker
-SmartExpense is a Python-based (or web-based) personal finance tracker that helps users record, analyze, and visualize their daily expenses. It allows you to add, edit, delete, and categorize expenses, and displays charts showing where your money goes each month.
+#  Project: Personal Expense Tracker
 
-- Core Features
-1. Add daily expenses with category (Food, Travel, Bills, etc.)
-2. Edit or delete existing records
-3. Display total monthly spending
-4. View summary by category (pie chart / bar graph)
-5. Save data to SQLite database
-8. Simple GUI (Tkinter) 
+### Description:
+    A Python-based desktop application for managing personal expenses.
+    The app allows users to add, view, filter, and delete transactions.
+    It also generates monthly reports and visual charts using SQLite
+    for data storage and Matplotlib for visualization.
+
+# Technologies Used:
+    - Python 3
+    - Tkinter (GUI)
+    - Tkcalendar (Date picker)
+    - SQLite3 (Database)
+    - Matplotlib (Charts)
+
+# Main Features:
+    - Add new transactions with category and description
+    - Filter transactions by month and year
+    - View all records in a TreeView table
+    - Generate detailed monthly reports
+    - Visualize spending with pie, bar, and line charts
+    - Delete selected transactions
+
+# This file contains:
+    - ExpenseTracker (database operations)
+    - ExpenseTrackerGUI (Tkinter interface)
+    - main() entry point
