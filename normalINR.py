@@ -130,7 +130,7 @@ class ExpenseTrackerGUI:
         self.tracker = ExpenseTracker()
         
         self.colors = {
-            'primary': "#0015FF",
+            'primary': "#2E379A",
             'secondary': '#A23B72',
             'success': '#06A77D',
             'danger': '#D90368',
@@ -147,7 +147,7 @@ class ExpenseTrackerGUI:
         title_frame.pack(fill='x')
         title_frame.pack_propagate(False)
         
-        tk.Label(title_frame, text="💰 Personal Expense Tracker (₹ INR)", 
+        tk.Label(title_frame, text="Personal Expense Tracker (₹ INR)", 
                 font=('Arial', 20, 'bold'), bg=self.colors['primary'], 
                 fg='white').pack(pady=15)
         
@@ -230,7 +230,7 @@ class ExpenseTrackerGUI:
                      side='left', expand=True, fill='x', padx=2)
         
         tk.Button(filter_frame, text="Generate Report", command=self.show_monthly_report,
-                 bg='#F39C12', fg='white', font=('Arial', 10, 'bold'),
+                 bg="#937A52", fg='white', font=('Arial', 10, 'bold'),
                  cursor='hand2', relief='flat', padx=10, pady=6).grid(
                      row=3, column=0, columnspan=2, pady=5, sticky='ew')
         
