@@ -5,7 +5,7 @@ from main import ExpenseTracker
 class TestExpenseTracker(unittest.TestCase):
 
     def setUp(self):
-        # Use in-memory database for testing
+        # Use in memory database for testing
         self.tracker = ExpenseTracker(db_name=":memory:")
 
     def tearDown(self):
