@@ -9,7 +9,7 @@ class TestExpenseTracker(unittest.TestCase):
         self.tracker = ExpenseTracker(db_name=":memory:")
 
     def tearDown(self):
-        # Close database connection
+        
         self.tracker.close()
 
     def test_add_transaction(self):
