@@ -47,7 +47,6 @@ class TestExpenseTracker(unittest.TestCase):
 
         summary = self.tracker.get_category_summary(2025, 1)
 
-        # Convert result to dict for easier testing
         summary_dict = {row[0]: row[1] for row in summary}
 
         self.assertEqual(summary_dict["Food"], 100)
