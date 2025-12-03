@@ -119,7 +119,6 @@ class ExpenseTracker:
             self.conn.close()
 
 
-
 #  frontend class: Tkinter GUI
 #  builds all screens
 #  shows tables, charts, report windows
@@ -347,7 +346,6 @@ class ExpenseTrackerGUI:
             messagebox.showerror("Error", "Invalid amount!")
 
 
-
     # show all records
     def refresh_transactions(self):
         for item in self.tree.get_children():
@@ -383,7 +381,6 @@ class ExpenseTrackerGUI:
         self.summary_label.config(text=f"{month_name} - Total: ₹{total:.2f} | Transactions: {len(transactions)}")
 
 
-
     #   delet selected record
     def delete_selected(self):
         selected = self.tree.selection()
@@ -400,7 +397,6 @@ class ExpenseTrackerGUI:
                 self.refresh_transactions()
             else:
                 messagebox.showerror("Error", "Could not delete transaction!")
-
 
 
     #   monthly report window
@@ -460,7 +456,6 @@ class ExpenseTrackerGUI:
             cat_tree.insert('', 'end', values=(cat, f'₹{amount:.2f}', f'{percentage:.1f}%'))
         
         cat_tree.pack(fill='both', expand=True)
-
 
 
  
@@ -543,14 +538,12 @@ Top Category:          {categories[0]}
         canvas.get_tk_widget().pack(fill='both', expand=True)
 
 
-
     
     #   close window
     
     def on_closing(self):
         self.tracker.close()
         self.root.destroy()
-
 
 
 
@@ -566,4 +559,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+# End of Personal-Expense-Tracker-Project
