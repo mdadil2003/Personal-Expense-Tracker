@@ -1,7 +1,7 @@
 # Project: Personal Expense Tracker
 
 ## Description
-A Python-based web application for managing personal expenses.
+A Python-based desktop application for managing personal expenses.
 The app allows users to add, view, filter, and delete transactions. 
 It also generates monthly reports and visual charts using SQLite for data storage and Matplotlib for visualization.
 
@@ -61,15 +61,9 @@ It also generates monthly reports and visual charts using SQLite for data storag
     ```bash
     python main.py
     ```
-
 ---
 
-## License
-This project is licensed under the MIT License.
 
 ## Author
 - [mdadil2003](https://github.com/mdadil2003)
 
----
-
-> *Please edit the "Recent Updates" section to specify exactly what new features or code changes have been made in your latest commits!*
