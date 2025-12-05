@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-from main import ExpenseTracker
+from trail import ExpenseTracker
 
 class TestExpenseTracker(unittest.TestCase):
 
