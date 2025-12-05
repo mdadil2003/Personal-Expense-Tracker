@@ -1,20 +1,8 @@
+# ---------------- Part 1 ----------------
 """
-Personal Expense Tracker — Multi-currency (Country – CODE) | Dark Mode | Export | Charts
-File: personal_expense_tracker_multicurrency.py
+Part 1: Imports, constants, ExpenseDB class, migration helper.
 
-Features:
- - Tkinter GUI (left control panel + right table)
- - Scrollable left panel and scrollable right table
- - Dark/Light theme toggle
- - Add / Edit / Delete transactions
- - Search across fields
- - Filter by month & year
- - Export CSV and PDF (reportlab optional)
- - Visualization using Matplotlib
- - Multi-currency dropdown (Country – CODE)
- - Stores original amount + currency + converted INR amount in DB
- - Static conversion table + optional live fetch using requests
- - Well-commented for viva / report
+Paste Part 1 first.
 """
 
 import os
@@ -22,13 +10,15 @@ import sqlite3
 import csv
 from datetime import datetime, timedelta, date
 from collections import defaultdict
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkcalendar import DateEntry
+
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Optional libraries — import safely
+# Optional libs
 try:
     import requests
     REQUESTS_AVAILABLE = True
@@ -44,30 +34,29 @@ try:
 except Exception:
     REPORTLAB_AVAILABLE = False
 
-# Database filename
+# Database filename constant
 DB_NAME = "expenses.db"
 
 
-# --------------------------
-# Backend: Database Handler
-# --------------------------
 class ExpenseDB:
-    """Handles all SQLite operations: schema, CRUD, budgets."""
+    """SQLite DB wrapper: creates schema, offers CRUD & budget ops."""
+
     def __init__(self, filename=DB_NAME):
-        self.db = sqlite3.connect(filename)
-        self.cur = self.db.cursor()
+        self.filename = filename
+        self.conn = sqlite3.connect(self.filename)
+        self.cur = self.conn.cursor()
         self._create_tables()
 
     def _create_tables(self):
-        """Create transactions and budgets tables."""
+        """Create transactions & budgets tables (idempotent)."""
         self.cur.execute('''
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
                 category TEXT NOT NULL,
-                amount_original REAL NOT NULL,
-                currency TEXT NOT NULL,
-                amount_in_inr REAL NOT NULL,
+                amount_original REAL,
+                currency TEXT,
+                amount_in_inr REAL,
                 description TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -81,14 +70,14 @@ class ExpenseDB:
                 UNIQUE(year, month)
             )
         ''')
-        self.db.commit()
+        self.conn.commit()
 
     def add_transaction(self, date_str, category, amount_original, currency, amount_in_inr, description=""):
         self.cur.execute('''
             INSERT INTO transactions (date, category, amount_original, currency, amount_in_inr, description)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (date_str, category, amount_original, currency, amount_in_inr, description))
-        self.db.commit()
+        self.conn.commit()
         return self.cur.lastrowid
 
     def update_transaction(self, trans_id, date_str, category, amount_original, currency, amount_in_inr, description=""):
@@ -97,12 +86,12 @@ class ExpenseDB:
             SET date=?, category=?, amount_original=?, currency=?, amount_in_inr=?, description=?
             WHERE id=?
         ''', (date_str, category, amount_original, currency, amount_in_inr, description, trans_id))
-        self.db.commit()
+        self.conn.commit()
         return self.cur.rowcount
 
     def delete_transaction(self, trans_id):
         self.cur.execute('DELETE FROM transactions WHERE id=?', (trans_id,))
-        self.db.commit()
+        self.conn.commit()
         return self.cur.rowcount
 
     def get_all_transactions(self):
@@ -167,15 +156,54 @@ class ExpenseDB:
             self.cur.execute('INSERT INTO budgets (year, month, amount) VALUES (?, ?, ?)', (year, month, amount))
         else:
             self.cur.execute('UPDATE budgets SET amount=? WHERE year=? AND month=?', (amount, year, month))
-        self.db.commit()
+        self.conn.commit()
 
     def close(self):
-        self.db.close()
+        self.conn.close()
 
 
-# --------------------------
-# App: GUI + Logic
-# --------------------------
+# Migration helper: if you want to keep the old data (run instead of deleting DB)
+def migrate_old_schema(db_name=DB_NAME):
+    """
+    If you prefer to migrate an older DB (which had 'amount' only),
+    run this script: it will add new columns and copy old amount into amount_original/amount_in_inr.
+    """
+    if not os.path.exists(db_name):
+        print("No DB file found to migrate.")
+        return
+    conn = sqlite3.connect(db_name)
+    cur = conn.cursor()
+    # get current columns
+    cur.execute("PRAGMA table_info(transactions)")
+    cols = [c[1] for c in cur.fetchall()]
+    # add missing columns
+    if "amount_original" not in cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN amount_original REAL")
+    if "currency" not in cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN currency TEXT DEFAULT 'INR'")
+    if "amount_in_inr" not in cols:
+        cur.execute("ALTER TABLE transactions ADD COLUMN amount_in_inr REAL")
+    conn.commit()
+    # copy old 'amount' into new columns if present
+    if "amount" in cols:
+        cur.execute("SELECT id, amount FROM transactions")
+        rows = cur.fetchall()
+        for r in rows:
+            tid, old_amount = r
+            cur.execute("UPDATE transactions SET amount_original=?, currency=?, amount_in_inr=? WHERE id=?",
+                        (old_amount, "INR", old_amount, tid))
+        conn.commit()
+        print("Migrated old 'amount' to new columns.")
+    conn.close()
+    print("Migration completed.")
+# ---------------- end Part 1 ----------------
+
+
+# ---------------- Part 2 ----------------
+"""
+Part 2: ExpenseTrackerApp class start, UI themes, currency definitions, optional live rates.
+"""
+
 class ExpenseTrackerApp:
     def __init__(self, root):
         self.root = root
@@ -186,7 +214,7 @@ class ExpenseTrackerApp:
         # backend
         self.db = ExpenseDB()
 
-        # currency list (Country – CODE) mapping to code
+        # Currency dropdown mapping: "Country – CODE" -> "CODE"
         self.currency_list = {
             "India – INR": "INR",
             "United States – USD": "USD",
@@ -215,8 +243,8 @@ class ExpenseTrackerApp:
             "Indonesia – IDR": "IDR"
         }
 
-        # currency rates: mapping currency_code -> INR rate (1 unit of currency equals rate INR)
-        # These are example static rates — replace with fetch_live_rates() for live data
+        # Static sample currency rates to INR (1 unit of currency -> X INR)
+        # Replace by live rates if needed
         self.currency_rates = {
             "INR": 1.0, "USD": 83.0, "EUR": 90.0, "GBP": 104.0, "AED": 22.6,
             "SAR": 22.15, "QAR": 22.8, "KWD": 270.0, "BHD": 220.0,
@@ -226,11 +254,11 @@ class ExpenseTrackerApp:
             "IDR": 0.0053
         }
 
-        # UI theme colors (light/dark)
+        # UI themes
         self.theme_light = {
             'root_bg': '#f0f0f0',
             'panel_bg': 'white',
-            'title_bg': '#1155CC',  # blue header
+            'title_bg': '#1155CC',
             'title_fg': 'white',
             'accent': '#2E379A',
             'success': '#06A77D',
@@ -249,7 +277,7 @@ class ExpenseTrackerApp:
         }
         self.current_theme = self.theme_light
 
-        # editing state
+        # editing state id
         self.editing_id = None
 
         # build UI
@@ -257,48 +285,46 @@ class ExpenseTrackerApp:
         # initial load
         self.refresh_all()
 
-    # --------------------------
-    # Optional: fetch live rates (uses requests)
-    # --------------------------
     def fetch_live_rates(self, base="INR"):
-        """Fetch live rates from a free API and update self.currency_rates.
-        Uses open.er-api.com which is free; requires internet.
-        This function is optional—failures are handled gracefully."""
+        """Optional: fetch live rates from open.er-api.com, update currency_rates.
+        Requires 'requests' installed and internet access. Handles gracefully.
+        """
         if not REQUESTS_AVAILABLE:
-            messagebox.showwarning("Requests missing", "requests library not installed. Live rates unavailable.")
+            messagebox.showwarning("Requests missing", "Install 'requests' to enable live rates.")
             return False
         try:
-            # Example: get all rates relative to INR
             url = f"https://open.er-api.com/v6/latest/{base}"
             resp = requests.get(url, timeout=8)
             data = resp.json()
             if data.get("result") == "success":
                 rates = data.get("rates", {})
-                # rates: 1 INR equals rates[CUR] ??? depends on API; for open.er-api, base is base currency
-                # We'll convert so that currency_rates[c] = value_of_1_c_in_INR
-                # If base == 'INR', rates gives how many of target currency equals 1 INR -> invert
+                # If base == INR, rates gives: 1 INR = rates[cur] (cur units)
+                # We want 1 unit of currency -> INR, so invert
                 if base == "INR":
                     for cur, val in rates.items():
                         if val and val != 0:
                             self.currency_rates[cur] = 1.0 / val
                 else:
-                    # If base is USD or others, we need to fetch rates for that base and then compute relative to INR
-                    # Fetch INR-base rates then compute. Simpler: fetch USD, then compute pairwise (not implemented here).
+                    # For other base currencies, not implemented in this script
                     pass
-                messagebox.showinfo("Live rates", "Live currency rates updated from API.")
+                messagebox.showinfo("Rates", "Live currency rates fetched.")
                 return True
             else:
-                messagebox.showwarning("Rate fetch failed", "API did not return success.")
+                messagebox.showwarning("Rates", "API response not successful.")
                 return False
         except Exception as e:
-            messagebox.showwarning("Rate fetch error", f"Could not fetch live rates:\n{e}")
+            messagebox.showwarning("Rates error", f"Could not fetch rates:\n{e}")
             return False
+# ---------------- end Part 2 ----------------
 
-    # --------------------------
-    # Build UI
-    # --------------------------
+
+# ---------------- Part 3 ----------------
+
+
+    # (Continue inside ExpenseTrackerApp)
+
     def build_ui(self):
-        # title bar
+        # Title bar
         self.title_frame = tk.Frame(self.root, bg=self.current_theme['title_bg'], height=60)
         self.title_frame.pack(fill='x')
         self.title_frame.pack_propagate(False)
@@ -306,19 +332,17 @@ class ExpenseTrackerApp:
         tk.Label(self.title_frame, text="  Personal Expense Tracker", bg=self.current_theme['title_bg'],
                  fg=self.current_theme['title_fg'], font=('Arial', 18, 'bold')).pack(side='left', padx=10)
 
-        # Toggle theme button
+        # Theme toggle + export + search in title bar
         self.theme_btn = tk.Button(self.title_frame, text="Toggle Theme", command=self.toggle_theme)
-        self.theme_btn.pack(side='right', padx=8, pady=10)
+        self.theme_btn.pack(side='right', padx=6, pady=10)
 
-        # Export buttons
         export_frame = tk.Frame(self.title_frame, bg=self.current_theme['title_bg'])
         export_frame.pack(side='right', padx=6)
         tk.Button(export_frame, text="Export CSV", command=self.export_csv).pack(side='left', padx=4)
         tk.Button(export_frame, text="Export PDF", command=self.export_pdf).pack(side='left', padx=4)
 
-        # Search bar (in title)
         search_frame = tk.Frame(self.title_frame, bg=self.current_theme['title_bg'])
-        search_frame.pack(side='right', padx=10)
+        search_frame.pack(side='right', padx=8)
         tk.Label(search_frame, text="Search:", bg=self.current_theme['title_bg'], fg='white').pack(side='left')
         self.search_var = tk.StringVar()
         self.search_entry = tk.Entry(search_frame, textvariable=self.search_var, width=22)
@@ -326,32 +350,15 @@ class ExpenseTrackerApp:
         tk.Button(search_frame, text="Search", command=self.search).pack(side='left', padx=4)
         tk.Button(search_frame, text="Clear", command=self.clear_search).pack(side='left', padx=2)
 
-        # main container
+        # Main area
         self.main_frame = tk.Frame(self.root, bg=self.current_theme['root_bg'])
         self.main_frame.pack(fill='both', expand=True, padx=8, pady=8)
 
-        # Left panel (scrollable)
-        self.build_left_panel()
-
-        # Right panel (table)
-        self.build_right_panel()
-
-        # Bottom summary
-        self.summary_frame = tk.Frame(self.root, bg=self.current_theme['panel_bg'], height=36)
-        self.summary_frame.pack(fill='x', side='bottom')
-        self.summary_label = tk.Label(self.summary_frame, text="Total: ₹0.00", bg=self.current_theme['panel_bg'],
-                                      fg=self.current_theme['text'], font=('Arial', 11, 'bold'))
-        self.summary_label.pack(side='right', padx=12, pady=6)
-
-        # Apply theme to widgets
-        self.apply_theme()
-
-    def build_left_panel(self):
+        # Left outer frame with scrolling canvas
         left_outer = tk.Frame(self.main_frame, width=360, bg=self.current_theme['panel_bg'])
-        left_outer.pack(side='left', fill='y', padx=(0, 8))
+        left_outer.pack(side='left', fill='y', padx=(0,8))
         left_outer.pack_propagate(False)
 
-        # Canvas inside left_outer to provide scrolling
         left_canvas = tk.Canvas(left_outer, bg=self.current_theme['panel_bg'], highlightthickness=0)
         left_canvas.pack(side='left', fill='both', expand=True)
         left_vsb = ttk.Scrollbar(left_outer, orient='vertical', command=left_canvas.yview)
@@ -361,21 +368,18 @@ class ExpenseTrackerApp:
         self.left_frame = tk.Frame(left_canvas, bg=self.current_theme['panel_bg'])
         left_canvas.create_window((0, 0), window=self.left_frame, anchor='nw')
 
-        # update scroll region
-        def on_config(event):
+        def left_config(event):
             left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+        self.left_frame.bind("<Configure>", left_config)
 
-        self.left_frame.bind("<Configure>", on_config)
-
-        # Mouse wheel binding for better UX
+        # mouse wheel
         def _on_mousewheel(event):
             left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
         self.left_frame.bind("<Enter>", lambda e: self.left_frame.bind_all("<MouseWheel>", _on_mousewheel))
         self.left_frame.bind("<Leave>", lambda e: self.left_frame.unbind_all("<MouseWheel>"))
 
-        # Dashboard small box
-        dash_box = ttk.LabelFrame(self.left_frame, text="Dashboard", padding=(10, 8))
+        # Dashboard box
+        dash_box = ttk.LabelFrame(self.left_frame, text="Dashboard", padding=(10,8))
         dash_box.pack(fill='x', padx=8, pady=8)
         self.dash_today = tk.Label(dash_box, text="Today: ₹0.00", anchor='w')
         self.dash_today.pack(fill='x')
@@ -383,12 +387,12 @@ class ExpenseTrackerApp:
         self.dash_week.pack(fill='x')
         self.dash_month = tk.Label(dash_box, text="This Month: ₹0.00", anchor='w')
         self.dash_month.pack(fill='x')
-        tk.Label(dash_box, text="Top Categories:", anchor='w').pack(fill='x', pady=(6, 0))
+        tk.Label(dash_box, text="Top Categories:", anchor='w').pack(fill='x', pady=(6,0))
         self.dash_top = tk.Label(dash_box, text="-", anchor='w', justify='left')
         self.dash_top.pack(fill='x')
 
-        # Add / Edit Transaction box
-        add_box = ttk.LabelFrame(self.left_frame, text="Add / Edit Transaction", padding=(10, 10))
+        # Add/Edit form
+        add_box = ttk.LabelFrame(self.left_frame, text="Add / Edit Transaction", padding=(10,10))
         add_box.pack(fill='x', padx=8, pady=8)
 
         tk.Label(add_box, text="Date:").grid(row=0, column=0, sticky='w', pady=4)
@@ -397,7 +401,7 @@ class ExpenseTrackerApp:
 
         tk.Label(add_box, text="Category:").grid(row=1, column=0, sticky='w', pady=4)
         self.category_var = tk.StringVar()
-        categories = ['Food', 'Transport', 'Entertainment', 'Shopping', 'Bills', 'Healthcare', 'Education', 'Other']
+        categories = ['Food','Transport','Entertainment','Shopping','Bills','Healthcare','Education','Other']
         self.category_combo = ttk.Combobox(add_box, values=categories, textvariable=self.category_var, width=16, state='readonly')
         self.category_combo.grid(row=1, column=1, sticky='e', pady=4)
         self.category_combo.set('Food')
@@ -406,7 +410,6 @@ class ExpenseTrackerApp:
         self.amount_entry = tk.Entry(add_box, width=18)
         self.amount_entry.grid(row=2, column=1, sticky='e', pady=4)
 
-        # Currency dropdown (Country – CODE)
         tk.Label(add_box, text="Currency:").grid(row=3, column=0, sticky='w', pady=4)
         self.currency_var = tk.StringVar()
         self.currency_combo = ttk.Combobox(add_box, values=list(self.currency_list.keys()),
@@ -418,15 +421,14 @@ class ExpenseTrackerApp:
         self.desc_entry = tk.Entry(add_box, width=20)
         self.desc_entry.grid(row=4, column=1, sticky='e', pady=4)
 
-        # Buttons: Add / Clear
         btn_frame = tk.Frame(add_box)
         btn_frame.grid(row=5, column=0, columnspan=2, pady=8)
         self.add_btn = tk.Button(btn_frame, text="Add Transaction", command=self.add_or_update_transaction)
         self.add_btn.pack(side='left', padx=6)
         tk.Button(btn_frame, text="Clear", command=self.clear_inputs).pack(side='left', padx=6)
 
-        # Budget box (month-year)
-        budget_box = ttk.LabelFrame(self.left_frame, text="Monthly Budget", padding=(10, 10))
+        # Budget box
+        budget_box = ttk.LabelFrame(self.left_frame, text="Monthly Budget", padding=(10,10))
         budget_box.pack(fill='x', padx=8, pady=8)
         tk.Label(budget_box, text="Month:").grid(row=0, column=0, sticky='w')
         self.budget_month = tk.Spinbox(budget_box, from_=1, to=12, width=6)
@@ -442,7 +444,7 @@ class ExpenseTrackerApp:
         self.budget_label.grid(row=4, column=0, columnspan=2)
 
         # Filters & actions
-        filter_box = ttk.LabelFrame(self.left_frame, text="Filters & Actions", padding=(10, 10))
+        filter_box = ttk.LabelFrame(self.left_frame, text="Filters & Actions", padding=(10,10))
         filter_box.pack(fill='x', padx=8, pady=8)
         tk.Label(filter_box, text="Month:").grid(row=0, column=0, sticky='w')
         self.filter_month = tk.Spinbox(filter_box, from_=1, to=12, width=6)
@@ -456,6 +458,11 @@ class ExpenseTrackerApp:
         tk.Button(filter_box, text="Visualize", command=self.show_visualization).grid(row=4, column=0, columnspan=2, pady=6, sticky='ew')
         tk.Button(filter_box, text="Delete Selected", command=self.delete_selected).grid(row=5, column=0, columnspan=2, pady=6, sticky='ew')
 
+# ---------------- end Part 3 ----------------
+
+# ---------------- Part 4 ----------------
+
+    # Right panel build (continue within ExpenseTrackerApp)
     def build_right_panel(self):
         right_outer = tk.Frame(self.main_frame, bg=self.current_theme['panel_bg'])
         right_outer.pack(side='right', fill='both', expand=True)
@@ -466,7 +473,6 @@ class ExpenseTrackerApp:
         table_frame = tk.Frame(right_outer)
         table_frame.pack(fill='both', expand=True, padx=6, pady=6)
 
-        # Treeview with scrollbars
         self.tree = ttk.Treeview(table_frame, columns=('ID', 'Date', 'Category', 'Amount_Original', 'Currency', 'Amount_INR', 'Description'),
                                  show='headings')
         vsb = ttk.Scrollbar(table_frame, orient='vertical', command=self.tree.yview)
@@ -494,47 +500,66 @@ class ExpenseTrackerApp:
         self.tree.column('Amount_INR', width=120, anchor='e')
         self.tree.column('Description', width=360, anchor='w')
 
-        # Double-click -> Edit
+        # Double-click to edit
         self.tree.bind("<Double-1>", self.on_tree_double_click)
 
-        # Style tree headings
+        # Basic header style (colors handled in apply_theme)
         style = ttk.Style()
-        style.configure("Treeview.Heading", font=('Arial', 11, 'bold'), foreground='white', background=self.current_theme['title_bg'])
+        style.configure("Treeview.Heading", font=('Arial', 11, 'bold'))
 
-    # --------------------------
-    # Theme
-    # --------------------------
-    def apply_theme(self):
-        t = self.current_theme
-        self.root.configure(bg=t['root_bg'])
-        self.main_frame.configure(bg=t['root_bg'])
-        self.title_frame.configure(bg=t['title_bg'])
-        # update add button color
+    # Edit load on double-click
+    def on_tree_double_click(self, event):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        vals = self.tree.item(sel[0])['values']
+        trans_id = vals[0]
+        # fetch the record from DB
+        rows = self.db.get_all_transactions()
+        record = next((r for r in rows if r[0] == trans_id), None)
+        if not record:
+            return
+        # populate form for edit
+        self.editing_id = record[0]
         try:
-            self.add_btn.configure(bg=t['success'], fg='white')
+            self.date_entry.set_date(datetime.strptime(record[1], '%Y-%m-%d').date())
         except Exception:
             pass
-        # update summary
-        self.summary_frame.configure(bg=t['panel_bg'])
-        self.summary_label.configure(bg=t['panel_bg'], fg=t['text'])
+        self.category_combo.set(record[2])
+        self.amount_entry.delete(0, tk.END)
+        self.amount_entry.insert(0, str(record[3] or ""))
+        # set currency dropdown to key (Country – CODE)
+        currency_code = record[4] or "INR"
+        key = next((k for k, v in self.currency_list.items() if v == currency_code), "India – INR")
+        self.currency_combo.set(key)
+        self.desc_entry.delete(0, tk.END)
+        if record[6]:
+            self.desc_entry.insert(0, record[6])
+        self.add_btn.configure(text="Update Transaction")
 
-    def toggle_theme(self):
-        self.current_theme = self.theme_dark if self.current_theme == self.theme_light else self.theme_light
-        self.apply_theme()
+    def delete_selected(self):
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showwarning("Select", "Select a transaction to delete")
+            return
+        vals = self.tree.item(sel[0])['values']
+        tid = vals[0]
+        if messagebox.askyesno("Confirm", f"Delete transaction ID {tid}?"):
+            self.db.delete_transaction(tid)
+            self.refresh_all()
+# ---------------- end Part 4 ----------------
 
-    # --------------------------
-    # CRUD: Add, Update, Delete
-    # --------------------------
+# ---------------- Part 5 ----------------
+
+
+    # Add or update transaction (handles currency conversion)
     def add_or_update_transaction(self):
-        """Add or update depending on self.editing_id."""
-        # read fields
         try:
             date_str = self.date_entry.get_date().strftime('%Y-%m-%d')
         except Exception:
             date_str = self.date_entry.get()
         category = self.category_var.get()
         desc = self.desc_entry.get().strip()
-        # amount and currency
         amt_text = self.amount_entry.get().strip()
         if not amt_text:
             messagebox.showerror("Input error", "Enter amount")
@@ -551,12 +576,10 @@ class ExpenseTrackerApp:
         country_currency = self.currency_var.get()
         currency_code = self.currency_list.get(country_currency, "INR")
 
-        # conversion: amount_in_inr = amount_original * rate_of_currency_to_INR
         rate = self.currency_rates.get(currency_code, 1.0)
         amount_in_inr = amount_original * rate
 
         if self.editing_id:
-            # update
             updated = self.db.update_transaction(self.editing_id, date_str, category, amount_original, currency_code, amount_in_inr, desc)
             if updated:
                 messagebox.showinfo("Updated", "Transaction updated successfully.")
@@ -568,7 +591,6 @@ class ExpenseTrackerApp:
             self.db.add_transaction(date_str, category, amount_original, currency_code, amount_in_inr, desc)
             messagebox.showinfo("Added", f"Saved ({currency_code} → ₹{amount_in_inr:.2f})")
 
-        # clear and refresh
         self.clear_inputs()
         self.refresh_all()
 
@@ -582,69 +604,23 @@ class ExpenseTrackerApp:
         self.desc_entry.delete(0, tk.END)
         self.currency_combo.set("India – INR")
         self.editing_id = None
-        try:
-            self.add_btn.configure(text="Add Transaction")
-        except Exception:
-            pass
+        self.add_btn.configure(text="Add Transaction")
 
-    def on_tree_double_click(self, event):
-        """Load selected row into left form for edit"""
-        sel = self.tree.selection()
-        if not sel:
-            return
-        vals = self.tree.item(sel[0])['values']
-        trans_id = vals[0]
-        # find full record from DB
-        rows = self.db.get_all_transactions()
-        record = None
+    # Populate tree with rows
+    def populate_tree(self, rows):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
         for r in rows:
-            if r[0] == trans_id:
-                record = r
-                break
-        if not record:
-            return
-        # populate form
-        self.editing_id = record[0]
-        try:
-            self.date_entry.set_date(datetime.strptime(record[1], '%Y-%m-%d').date())
-        except Exception:
-            pass
-        self.category_combo.set(record[2])
-        self.amount_entry.delete(0, tk.END)
-        self.amount_entry.insert(0, str(record[3]))
-        # set currency dropdown by code -> key
-        currency_code = record[4]
-        # find key for this code
-        key = next((k for k, v in self.currency_list.items() if v == currency_code), "India – INR")
-        self.currency_combo.set(key)
-        self.desc_entry.delete(0, tk.END)
-        if record[6]:
-            self.desc_entry.insert(0, record[6])
-        try:
-            self.add_btn.configure(text="Update Transaction")
-        except Exception:
-            pass
+            self.tree.insert('', 'end', values=(r[0], r[1], r[2], f"{(r[3] or 0):.2f}", r[4] or "INR", f"₹{(r[5] or 0):.2f}", r[6] or ""))
 
-    def delete_selected(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showwarning("Select", "Select a transaction to delete")
-            return
-        vals = self.tree.item(sel[0])['values']
-        tid = vals[0]
-        if messagebox.askyesno("Confirm", f"Delete transaction ID {tid}?"):
-            self.db.delete_transaction(tid)
-            self.refresh_all()
-
-    # --------------------------
-    # Refresh / View / Search
-    # --------------------------
+    # Refresh all rows and dashboard/budget
     def refresh_all(self):
         rows = self.db.get_all_transactions()
         self.populate_tree(rows)
-        self.update_summary_and_dashboard(rows)
+        self.update_dashboard()
         self.update_budget_progress()
 
+    # View specific month
     def view_month(self):
         try:
             year = int(self.filter_year.get())
@@ -654,25 +630,10 @@ class ExpenseTrackerApp:
             return
         rows = self.db.get_transactions_by_month(year, month)
         self.populate_tree(rows)
-        self.update_summary_and_dashboard(rows)
+        self.update_dashboard()
         self.update_budget_progress()
 
-    def populate_tree(self, rows):
-        # clear
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        # insert
-        for r in rows:
-            # r: (id, date, category, amount_original, currency, amount_in_inr, description)
-            self.tree.insert('', 'end', values=(r[0], r[1], r[2], f"{r[3]:.2f}", r[4], f"₹{r[5]:.2f}", r[6] or ""))
-
-    def update_summary_and_dashboard(self, rows):
-        # total INR across passed rows
-        total_inr = sum([r[5] for r in rows]) if rows else 0.0
-        self.summary_label.configure(text=f"Total: ₹{total_inr:.2f} | Transactions: {len(rows)}")
-        # dashboard -> overall (today/week/month)
-        self.update_dashboard()
-
+    # Search across fields
     def search(self):
         q = self.search_var.get().strip().lower()
         if not q:
@@ -686,15 +647,13 @@ class ExpenseTrackerApp:
                     (r[6] and q in r[6].lower())):
                 filtered.append(r)
         self.populate_tree(filtered)
-        self.update_summary_and_dashboard(filtered)
+        self.update_dashboard()
 
     def clear_search(self):
         self.search_var.set("")
         self.refresh_all()
 
-    # --------------------------
-    # Dashboard & Budget
-    # --------------------------
+    # Dashboard update (today, week, month totals)
     def update_dashboard(self):
         today = date.today()
         start_today = today.strftime('%Y-%m-%d')
@@ -724,6 +683,7 @@ class ExpenseTrackerApp:
             top_text += f"{c}: ₹{a:.2f}\n"
         self.dash_top.configure(text=top_text.strip() or "No data")
 
+    # Budget set/update
     def set_budget(self):
         try:
             year = int(self.budget_year.get())
@@ -751,17 +711,20 @@ class ExpenseTrackerApp:
             self.budget_label.configure(text="No budget set")
             return
         rows = self.db.get_transactions_by_month(year, month)
-        spent = sum([r[5] for r in rows])
+        spent = sum([r[5] or 0 for r in rows])
         pct = (spent / budget) * 100 if budget > 0 else 0
         self.budget_label.configure(text=f"Budget: ₹{budget:.2f}  Spent: ₹{spent:.2f} ({pct:.1f}%)")
         if spent > budget:
             self.budget_label.configure(fg='red')
         else:
             self.budget_label.configure(fg='black')
+# ---------------- end Part 5 ----------------
 
-    # --------------------------
-    # Reporting & Visualization
-    # --------------------------
+
+# ---------------- Part 6 ----------------
+
+
+    # Monthly report window
     def show_monthly_report(self):
         try:
             year = int(self.filter_year.get())
@@ -782,7 +745,6 @@ class ExpenseTrackerApp:
         tk.Label(win, text=f"Total: ₹{total:.2f}", font=('Arial', 12, 'bold')).pack()
         tk.Label(win, text=f"Transactions: {len(rows)}").pack(pady=6)
 
-        # show category breakdown
         frame = tk.Frame(win)
         frame.pack(fill='both', expand=True, padx=10, pady=10)
         cat_tree = ttk.Treeview(frame, columns=('Category', 'Amount', 'Percentage'), show='headings')
@@ -797,6 +759,7 @@ class ExpenseTrackerApp:
             pct = (amt / total) * 100 if total else 0
             cat_tree.insert('', 'end', values=(cat, f"₹{amt:.2f}", f"{pct:.1f}%"))
 
+    # Visualization window (matplotlib)
     def show_visualization(self):
         try:
             year = int(self.filter_year.get())
@@ -831,7 +794,7 @@ class ExpenseTrackerApp:
 
         daily = defaultdict(float)
         for r in rows:
-            daily[r[1]] += r[5]
+            daily[r[1]] += r[5] or 0
         dates = sorted(daily.keys())
         daily_amt = [daily[d] for d in dates]
         ax3.plot(dates, daily_amt, marker='o')
@@ -840,7 +803,7 @@ class ExpenseTrackerApp:
 
         total = sum(amounts)
         avg = total / len(rows) if rows else 0
-        largest = max(r[5] for r in rows)
+        largest = max((r[5] or 0) for r in rows) if rows else 0
         top_cat = categories[0] if categories else "-"
         stats = f"Total: ₹{total:,.2f}\nTransactions: {len(rows)}\nAverage: ₹{avg:.2f}\nLargest: ₹{largest:.2f}\nTop Category: {top_cat}"
         ax4.axis('off')
@@ -851,18 +814,14 @@ class ExpenseTrackerApp:
         canvas.draw()
         canvas.get_tk_widget().pack(fill='both', expand=True)
 
-    # --------------------------
-    # Export CSV/PDF
-    # --------------------------
+    # Export visible table to CSV
     def export_csv(self):
-        # Export visible rows in table
         f = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
         if not f:
             return
         rows = []
         for item in self.tree.get_children():
             vals = self.tree.item(item)['values']
-            # vals mapping: (ID, Date, Category, OriginalAmountStr, Currency, INRStr, Description)
             rows.append([vals[0], vals[1], vals[2], vals[3], vals[4], vals[5], vals[6]])
         try:
             with open(f, 'w', newline='', encoding='utf-8') as fp:
@@ -873,6 +832,7 @@ class ExpenseTrackerApp:
         except Exception as e:
             messagebox.showerror("Export CSV", f"Failed: {e}")
 
+    # Export to PDF using reportlab if available
     def export_pdf(self):
         if not REPORTLAB_AVAILABLE:
             messagebox.showwarning("ReportLab", "reportlab lib not installed. Install with: pip install reportlab")
@@ -903,17 +863,31 @@ class ExpenseTrackerApp:
         except Exception as e:
             messagebox.showerror("Export PDF", f"Failed: {e}")
 
-    # --------------------------
-    # Clean shutdown
-    # --------------------------
+    # Theme apply & toggle
+    def apply_theme(self):
+        t = self.current_theme
+        self.root.configure(bg=t['root_bg'])
+        self.main_frame.configure(bg=t['root_bg'])
+        self.title_frame.configure(bg=t['title_bg'])
+        self.summary_frame.configure(bg=t['panel_bg'])
+        self.summary_label.configure(bg=t['panel_bg'], fg=t['text'])
+        # update button color safely
+        try:
+            self.add_btn.configure(bg=t['success'], fg='white')
+        except Exception:
+            pass
+
+    def toggle_theme(self):
+        self.current_theme = self.theme_dark if self.current_theme == self.theme_light else self.theme_light
+        self.apply_theme()
+
+    # Close handler
     def close(self):
         self.db.close()
         self.root.destroy()
 
 
-# --------------------------
-# Entrypoint
-# --------------------------
+# Entry point
 def main():
     root = tk.Tk()
     app = ExpenseTrackerApp(root)
@@ -923,3 +897,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+# ---------------- end Part 6 ----------------
+
